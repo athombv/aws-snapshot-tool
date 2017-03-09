@@ -28,6 +28,8 @@ import time
 import sys
 import logging
 from config import config
+import json
+from urllib2 import Request, urlopen, URLError, HTTPError
 
 
 if (len(sys.argv) < 2):
@@ -74,6 +76,7 @@ aws_secret_key = config['aws_secret_key']
 ec2_region_name = config['ec2_region_name']
 ec2_region_endpoint = config['ec2_region_endpoint']
 sns_arn = config.get('arn')
+slack_hook = config.get('slack_hook')
 proxyHost = config.get('proxyHost')
 proxyPort = config.get('proxyPort')
 
@@ -228,11 +231,32 @@ message += "\nTotal snapshots deleted: " + str(total_deletes) + "\n"
 print '\n' + message + '\n'
 print result
 
+logging.info(result)
+
 # SNS reporting
 if sns_arn:
     if errmsg:
         sns.publish(sns_arn, 'Error in processing volumes: ' + errmsg, 'Error with AWS Snapshot')
     sns.publish(sns_arn, message, 'Finished AWS snapshotting')
 
-logging.info(result)
+if slack_hook:
+    if errmsg:
+        slack_message = {
+            'channel': 'alarms',
+            'text': "Snapshot backup failed: %s" % (errmsg)
+        }
+    else:
+        slack_message = {
+            'channel': 'software',
+            'text': "Snapshot backup finished: %s" % (message)
+        }
 
+    req = Request(slack_hook, json.dumps(slack_message))
+    try:
+        response = urlopen(req)
+        response.read()
+        logging.info("Message posted to %s", slack_message['channel'])
+    except HTTPError as e:
+        logging.error("Request failed: %d %s", e.code, e.reason)
+    except URLError as e:
+        logging.error("Server connection failed: %s", e.reason)
